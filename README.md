@@ -12,6 +12,7 @@ activities.
 - Enum-validated lead status with a guarded state machine:
   `NEW → CONTACTED → QUALIFIED → CONVERTED` (any active stage can move to `LOST`)
 - Follow-up notes attached to a lead, returned newest first
+- Dashboard summary endpoint: lead / follow-up totals, per-status counters and the five latest follow-ups
 - Email validation via Pydantic `EmailStr`
 - Automatic OpenAPI / Swagger documentation
 - Test suite running against an in-memory SQLite database
@@ -37,8 +38,10 @@ business-automation-platform/
 │   │   └── v1/
 │   │       ├── router.py       # Version 1 API router
 │   │       └── endpoints/
-│   │           └── lead.py     # Lead HTTP endpoints
-│   ├── core/                   # Placeholder for shared config / security
+│   │           ├── lead.py     # Lead HTTP endpoints
+│   │           └── dashboard.py # Dashboard statistics endpoint
+│   ├── core/
+│   │   └── constants.py        # Pipeline statuses, transitions and shared constants
 │   ├── db/
 │   │   ├── base.py             # Declarative base
 │   │   └── database.py         # Engine, session factory, get_db dependency
@@ -46,11 +49,15 @@ business-automation-platform/
 │   │   ├── lead.py             # Lead ORM model
 │   │   └── lead_follow_up.py   # Follow-up ORM model
 │   ├── schemas/
-│   │   └── lead.py             # Pydantic request / response schemas
+│   │   ├── lead.py             # Lead request / response schemas
+│   │   └── dashboard.py        # Dashboard response schemas
 │   └── services/
-│       └── lead_service.py     # Business logic and queries
+│       ├── lead_service.py     # Lead business logic and queries
+│       └── dashboard_service.py # Dashboard aggregation queries
 ├── tests/
-│   └── test_lead.py            # API tests
+│   ├── conftest.py             # Shared in-memory database fixture
+│   ├── test_lead.py            # Lead API tests
+│   └── test_dashboard.py       # Dashboard API tests
 ├── requirements.txt
 └── README.md
 ```
@@ -117,6 +124,7 @@ Base path: `/api/v1`
 | `PATCH` | `/leads/{lead_id}/status` | Move a lead to another pipeline status |
 | `POST` | `/leads/{lead_id}/follow-ups` | Add a follow-up note |
 | `GET` | `/leads/{lead_id}/follow-ups` | List follow-up notes (newest first) |
+| `GET` | `/dashboard/summary` | Dashboard totals, per-status counts and 5 latest follow-ups |
 
 Health check: `GET /health`
 
@@ -137,7 +145,34 @@ curl -X PATCH http://127.0.0.1:8000/api/v1/leads/1/status \
 curl -X POST http://127.0.0.1:8000/api/v1/leads/1/follow-ups \
   -H "Content-Type: application/json" \
   -d '{"content":"Called the customer, demo scheduled."}'
+
+# Dashboard statistics
+curl http://127.0.0.1:8000/api/v1/dashboard/summary
 ```
+
+Example dashboard response:
+
+```json
+{
+  "total_leads": 2,
+  "total_follow_ups": 1,
+  "status_counts": {
+    "NEW": 1,
+    "CONTACTED": 1,
+    "QUALIFIED": 0,
+    "CONVERTED": 0,
+    "LOST": 0
+  },
+  "recent_follow_ups": [
+    {
+      "id": 1,
+      "lead_id": 1,
+      "lead_name": "Alice Chen",
+      "content": "Called the customer, demo scheduled.",
+      "created_at": "2026-11-12T08:30:00"
+    }
+  ]
+}
 
 ### Status Workflow
 

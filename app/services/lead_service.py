@@ -1,18 +1,10 @@
 from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.constants import ALLOWED_STATUS_TRANSITIONS
 from app.models.lead import Lead
 from app.models.lead_follow_up import LeadFollowUp
 from app.schemas.lead import LeadCreate, LeadFollowUpCreate, LeadUpdate
-
-# Allowed status changes for the sales pipeline. Terminal states cannot move further.
-ALLOWED_STATUS_TRANSITIONS = {
-    "NEW": {"CONTACTED", "LOST"},
-    "CONTACTED": {"QUALIFIED", "LOST"},
-    "QUALIFIED": {"CONVERTED", "LOST"},
-    "CONVERTED": set(),
-    "LOST": set(),
-}
 
 
 class InvalidLeadStatusTransition(Exception):

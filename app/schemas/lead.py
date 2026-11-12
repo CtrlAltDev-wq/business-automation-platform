@@ -1,16 +1,9 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-
-LeadStatus = Literal[
-    "NEW",
-    "CONTACTED",
-    "QUALIFIED",
-    "CONVERTED",
-    "LOST",
-]
+from app.core.constants import LeadStatus
 
 
 class LeadCreate(BaseModel):

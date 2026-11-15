@@ -26,6 +26,7 @@ out to Google Sheets, email auto-replies and n8n workflows with reliable retries
   event counters and the five latest follow-ups
 - Structured logging (`timestamp | level | logger | message`) to stdout
 - Email validation via Pydantic `EmailStr`
+- Versioned database schema with Alembic migrations
 - Automatic OpenAPI / Swagger documentation
 - Test suite running against an in-memory SQLite database
 
@@ -38,6 +39,7 @@ out to Google Sheets, email auto-replies and n8n workflows with reliable retries
 | Validation | Pydantic v2 |
 | Configuration | pydantic-settings (`.env` support) |
 | Database | PostgreSQL 17 via `psycopg` (SQLite also supported) |
+| Migrations | Alembic |
 | Integrations | n8n webhooks, Google Sheets API v4, SMTP email |
 | HTTP client | httpx / google-auth |
 | Server | Uvicorn |
@@ -87,6 +89,11 @@ business-automation-platform/
 │   │       └── n8n.py          # n8n webhook adapter
 │   └── workers/
 │       └── integration_worker.py # Retry worker for pending events
+├── alembic/
+│   ├── env.py                  # Alembic environment (reads DATABASE_URL from settings)
+│   ├── script.py.mako          # Migration file template
+│   └── versions/               # Migration scripts
+├── alembic.ini                 # Alembic configuration
 ├── tests/
 │   ├── conftest.py             # Shared in-memory database fixture
 │   ├── test_lead.py            # Lead API tests
@@ -117,7 +124,15 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Run the server
+### 3. Apply migrations
+
+The schema is managed by Alembic, so create the tables before the first start:
+
+```bash
+alembic upgrade head
+```
+
+### 4. Run the server
 
 ```bash
 uvicorn app.main:app --reload
@@ -128,9 +143,7 @@ The API is available at `http://127.0.0.1:8000`, and the interactive docs at:
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
-The SQLite file `business.db` is created automatically on first start.
-
-### 4. Run the tests
+### 5. Run the tests
 
 ```bash
 pytest -q
@@ -186,8 +199,28 @@ DATABASE_URL=postgresql+psycopg://user:password@127.0.0.1:5432/business_automati
 ```
 
 Special characters in the password must be URL-encoded (for example `!` becomes
-`%21`). Tables are created automatically on startup; for schema changes use a
-migration tool such as Alembic.
+`%21`). The schema is created by Alembic, not by the application.
+
+### Database Migrations
+
+Alembic reads `DATABASE_URL` from the same settings as the application, so `.env`
+is the single source of truth.
+
+```bash
+alembic upgrade head                    # apply all migrations
+alembic revision --autogenerate -m "add customer table"  # generate a migration from model changes
+alembic downgrade -1                    # roll back the last migration
+alembic check                           # fail if models and migrations are out of sync
+alembic current                         # show the applied revision
+```
+
+An existing database that was created before Alembic (for example by an earlier
+`create_all`) already has the tables. Mark it as up to date instead of re-running
+the initial migration:
+
+```bash
+alembic stamp head
+```
 
 ### Docker Compose
 
@@ -201,18 +234,22 @@ docker compose up --build
 | --- | --- | --- |
 | API | `http://127.0.0.1:8000` | Swagger UI at `/docs` |
 | Worker | – | Runs `integration_worker` in a retry loop |
+| Migrate | – | Runs `alembic upgrade head` once, then exits |
 | PostgreSQL | `127.0.0.1:5433` | Port 5433 avoids clashing with a local PostgreSQL on 5432 |
 | n8n | `http://127.0.0.1:5679` | Port 5679 avoids clashing with a local n8n on 5678 |
 
-Four containers are started: `api`, `worker`, `db` and `n8n`. PostgreSQL and n8n
-data live in named volumes (`postgres_data`, `n8n_data`), so they survive
-`docker compose down`.
+The stack starts `migrate` first: it applies the Alembic migrations and exits, and
+both `api` and `worker` wait for it to complete successfully
+(`service_completed_successfully`). PostgreSQL and n8n data live in named volumes
+(`postgres_data`, `n8n_data`), so they survive `docker compose down`.
 
 The API container reads `WEBHOOK_SECRET` from the local `.env` through compose
-variable substitution. `N8N_WEBHOOK_URL` is intentionally empty (dry-run); to
-deliver events to the bundled n8n instance, change it in `docker-compose.yml` to
-`http://n8n:5678/webhook/<path>`. Inside compose, `127.0.0.1` refers to the
-container itself, not the host.
+variable substitution. `N8N_WEBHOOK_URL` defaults to
+`http://host.docker.internal:5678/webhook/lead-created` so containers can reach a
+local n8n; override it with `N8N_WEBHOOK_URL_DOCKER` (for example
+`http://n8n:5678/webhook/lead-created` when n8n runs in this compose network, or an
+empty value for dry-run). Inside compose, `127.0.0.1` refers to the container
+itself, not the host.
 
 Useful commands:
 
@@ -408,8 +445,8 @@ Illegal transitions return `409 Conflict`; unknown status values return `422 Unp
 
 - [x] Background retry worker for email / Sheets / n8n automation
 - [x] Docker Compose stack (API + worker + PostgreSQL + n8n)
+- [x] Alembic database migrations
 - [ ] Authentication and role-based permissions
-- [ ] Alembic database migrations
 - [ ] Customer and deal modules
 - [ ] CI pipeline (ruff + pytest)
 

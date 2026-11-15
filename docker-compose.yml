@@ -32,6 +32,16 @@ services:
       timeout: 5s
       retries: 10
 
+  # Applies Alembic migrations once, then exits. The API and the worker wait for
+  # this container to finish successfully, so the schema always exists first.
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build: .
     environment: *app-environment
@@ -43,6 +53,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     build: .
@@ -53,6 +65,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   n8n:
     image: n8nio/n8n:latest

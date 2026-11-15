@@ -13,6 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
+# Migrations are applied by the "migrate" compose service.
+COPY alembic.ini ./
+COPY alembic ./alembic
+
 # Run as a non-root user.
 RUN useradd --create-home --uid 1000 appuser
 USER appuser

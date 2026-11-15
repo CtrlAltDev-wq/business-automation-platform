@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     # always override it in real deployments.
     webhook_secret: str = "dev-secret-change-me"
 
+    # SQLAlchemy database URL. SQLite by default; point it at PostgreSQL when needed,
+    # e.g. postgresql+psycopg://app_user:password@127.0.0.1:5432/business_automation
+    database_url: str = "sqlite:///./business.db"
+
+    # Log every SQL statement when true.
+    sql_echo: bool = False
+
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",

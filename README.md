@@ -26,7 +26,7 @@ activities.
 | ORM | SQLAlchemy 2.0 (typed `Mapped` models) |
 | Validation | Pydantic v2 |
 | Configuration | pydantic-settings (`.env` support) |
-| Database | SQLite (configurable via `DATABASE_URL`) |
+| Database | PostgreSQL 17 via `psycopg` (SQLite also supported) |
 | Server | Uvicorn |
 | Testing | pytest + FastAPI TestClient |
 
@@ -114,7 +114,7 @@ between environments.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DATABASE_URL` | `sqlite:///./business.db` | SQLAlchemy database URL |
+| `DATABASE_URL` | `sqlite:///./business.db` | SQLAlchemy URL, e.g. `postgresql+psycopg://app_user:secret@127.0.0.1:5432/business_automation` |
 | `SQL_ECHO` | `false` | Set to `true` to log every SQL statement |
 | `WEBHOOK_SECRET` | `dev-secret-change-me` | Shared secret required by `POST /webhooks/leads` |
 
@@ -123,6 +123,29 @@ Copy the template and fill in your own values (`.env` itself is git-ignored):
 ```bash
 cp .env.example .env
 ```
+
+### PostgreSQL
+
+The project defaults to SQLite for a zero-setup start, but PostgreSQL is the
+recommended database. A local instance can be started with Docker:
+
+```bash
+docker run -d --name business-automation-postgres \
+  -e POSTGRES_DB=business_automation \
+  -e POSTGRES_USER=user \
+  -e POSTGRES_PASSWORD=password \
+  -p 5432:5432 postgres:17
+```
+
+Then point `.env` at it:
+
+```bash
+DATABASE_URL=postgresql+psycopg://user:password@127.0.0.1:5432/business_automation
+```
+
+Special characters in the password must be URL-encoded (for example `!` becomes
+`%21`). Tables are created automatically on startup; for schema changes use a
+migration tool such as Alembic.
 
 ## API Reference
 

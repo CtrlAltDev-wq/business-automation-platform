@@ -1,12 +1,17 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db.base import Base
-from app.db.database import get_db
-from app.main import app
+# Keep the test suite on SQLite even when .env points the app at PostgreSQL.
+os.environ["DATABASE_URL"] = "sqlite://"
+
+from app.db.base import Base  # noqa: E402
+from app.db.database import get_db  # noqa: E402
+from app.main import app  # noqa: E402
 
 # In-memory test database shared across connections by StaticPool.
 test_engine = create_engine(

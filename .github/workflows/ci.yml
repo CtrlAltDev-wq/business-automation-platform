@@ -1,5 +1,10 @@
 name: CI
 
+# Title shown in the Actions list. Without run-name GitHub falls back to the
+# first line of the triggering commit message, which reads poorly when commits
+# have short messages. head_ref is set for pull requests, ref_name otherwise.
+run-name: CI · ${{ github.head_ref || github.ref_name }}
+
 on:
   push:
     branches: [main]

@@ -22,6 +22,9 @@ htmlcov/
 *.sqlite
 *.sqlite3
 
+# Logs
+*.log
+
 # Environment variables
 .env
 .env.*

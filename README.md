@@ -13,6 +13,7 @@ activities.
   `NEW → CONTACTED → QUALIFIED → CONVERTED` (any active stage can move to `LOST`)
 - Follow-up notes attached to a lead, returned newest first
 - Dashboard summary endpoint: lead / follow-up totals, per-status counters and the five latest follow-ups
+- Signed webhook ingestion with idempotency keys (retries never create duplicate leads)
 - Email validation via Pydantic `EmailStr`
 - Automatic OpenAPI / Swagger documentation
 - Test suite running against an in-memory SQLite database
@@ -24,6 +25,7 @@ activities.
 | Web framework | FastAPI |
 | ORM | SQLAlchemy 2.0 (typed `Mapped` models) |
 | Validation | Pydantic v2 |
+| Configuration | pydantic-settings (`.env` support) |
 | Database | SQLite (configurable via `DATABASE_URL`) |
 | Server | Uvicorn |
 | Testing | pytest + FastAPI TestClient |
@@ -39,15 +41,19 @@ business-automation-platform/
 │   │       ├── router.py       # Version 1 API router
 │   │       └── endpoints/
 │   │           ├── lead.py     # Lead HTTP endpoints
-│   │           └── dashboard.py # Dashboard statistics endpoint
+│   │           ├── dashboard.py # Dashboard statistics endpoint
+│   │           └── webhook.py  # Signed lead ingestion endpoint
 │   ├── core/
-│   │   └── constants.py        # Pipeline statuses, transitions and shared constants
+│   │   ├── config.py           # Environment-driven settings (.env)
+│   │   ├── constants.py        # Pipeline statuses, transitions and shared constants
+│   │   └── security.py         # Webhook shared-secret verification
 │   ├── db/
 │   │   ├── base.py             # Declarative base
 │   │   └── database.py         # Engine, session factory, get_db dependency
 │   ├── models/
 │   │   ├── lead.py             # Lead ORM model
-│   │   └── lead_follow_up.py   # Follow-up ORM model
+│   │   ├── lead_follow_up.py   # Follow-up ORM model
+│   │   └── webhook_idempotency.py # Processed webhook events
 │   ├── schemas/
 │   │   ├── lead.py             # Lead request / response schemas
 │   │   └── dashboard.py        # Dashboard response schemas
@@ -57,7 +63,8 @@ business-automation-platform/
 ├── tests/
 │   ├── conftest.py             # Shared in-memory database fixture
 │   ├── test_lead.py            # Lead API tests
-│   └── test_dashboard.py       # Dashboard API tests
+│   ├── test_dashboard.py       # Dashboard API tests
+│   └── test_webhook.py         # Webhook ingestion and idempotency tests
 ├── requirements.txt
 └── README.md
 ```
@@ -109,6 +116,13 @@ between environments.
 | --- | --- | --- |
 | `DATABASE_URL` | `sqlite:///./business.db` | SQLAlchemy database URL |
 | `SQL_ECHO` | `false` | Set to `true` to log every SQL statement |
+| `WEBHOOK_SECRET` | `dev-secret-change-me` | Shared secret required by `POST /webhooks/leads` |
+
+Create a `.env` file in the project root to override them locally (it is git-ignored):
+
+```bash
+WEBHOOK_SECRET=replace-with-a-long-random-value
+```
 
 ## API Reference
 
@@ -125,6 +139,7 @@ Base path: `/api/v1`
 | `POST` | `/leads/{lead_id}/follow-ups` | Add a follow-up note |
 | `GET` | `/leads/{lead_id}/follow-ups` | List follow-up notes (newest first) |
 | `GET` | `/dashboard/summary` | Dashboard totals, per-status counts and 5 latest follow-ups |
+| `POST` | `/webhooks/leads` | Authenticated lead ingestion with idempotency support |
 
 Health check: `GET /health`
 
@@ -173,6 +188,40 @@ Example dashboard response:
     }
   ]
 }
+```
+
+### Webhook Ingestion
+
+External systems (landing pages, form builders, CRM connectors) can push leads to
+`POST /api/v1/webhooks/leads`.
+
+| Header | Required | Description |
+| --- | --- | --- |
+| `X-Webhook-Secret` | yes | Must match `WEBHOOK_SECRET`; otherwise `403` |
+| `Idempotency-Key` | yes | Unique id per event, 1–255 chars; protects against retries |
+| `Content-Type` | yes | `application/json` |
+
+Response semantics:
+
+| Status | Meaning |
+| --- | --- |
+| `201 Created` | Lead created by this call |
+| `200 OK` | Duplicate delivery: the original lead is returned, nothing is created |
+| `403 Forbidden` | Missing or wrong secret |
+| `409 Conflict` | Same key reused with a different payload, or its lead was deleted |
+| `422 Unprocessable Entity` | Missing header or invalid body |
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/webhooks/leads \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  -H "Idempotency-Key: evt_20261115_0001" \
+  -d '{"name":"Alice Chen","phone":"13800138000","email":"alice@example.com"}'
+```
+
+Each request is fingerprinted with a SHA-256 hash of its canonical JSON payload and
+stored in `webhook_idempotency` together with the created lead, in a single transaction.
+Concurrent retries are resolved by the unique constraint on `idempotency_key`.
 
 ### Status Workflow
 

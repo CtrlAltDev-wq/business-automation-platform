@@ -1,10 +1,19 @@
+import hashlib
+import json
+
 from sqlalchemy import asc, desc, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.constants import ALLOWED_STATUS_TRANSITIONS
 from app.models.lead import Lead
 from app.models.lead_follow_up import LeadFollowUp
+from app.models.webhook_idempotency import WebhookIdempotency
 from app.schemas.lead import LeadCreate, LeadFollowUpCreate, LeadUpdate
+
+
+class IdempotencyConflict(Exception):
+    """Raised when an Idempotency-Key is reused with a different payload or a missing lead."""
 
 
 class InvalidLeadStatusTransition(Exception):
@@ -13,14 +22,7 @@ class InvalidLeadStatusTransition(Exception):
 
 def create_lead(db: Session, data: LeadCreate):
     """Insert a new lead. Every lead starts in the NEW status."""
-    lead = Lead(
-        name=data.name,
-        phone=data.phone,
-        email=data.email,
-        company=data.company,
-        message=data.message,
-        status="NEW",
-    )
+    lead = _build_lead(data)
 
     db.add(lead)
     db.commit()
@@ -238,3 +240,141 @@ def get_lead_follow_ups(
 
     # 3. Return the result list.
     return db.scalars(statement).all()
+
+
+def _calculate_payload_hash(data: LeadCreate) -> str:
+    """Return a stable SHA-256 hash of the payload so identical requests can be detected."""
+    # 1. Convert the Pydantic model into a plain dictionary.
+    payload = data.model_dump(mode="json")
+
+    # 2. Serialize it as canonical JSON (sorted keys, no extra whitespace).
+    canonical_json = json.dumps(
+        payload,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+    # 3. Hash the canonical string.
+    return hashlib.sha256(
+        canonical_json.encode("utf-8")
+    ).hexdigest()
+
+
+def _build_lead(data: LeadCreate) -> Lead:
+    """Build a Lead ORM object from a create payload."""
+    return Lead(
+        name=data.name,
+        phone=data.phone,
+        email=data.email,
+        company=data.company,
+        message=data.message,
+        status="NEW",
+    )
+
+
+def _resolve_existing_webhook_event(
+    db: Session,
+    event: WebhookIdempotency,
+    payload_hash: str,
+) -> Lead:
+    """Return the lead created by an earlier webhook call with the same Idempotency-Key."""
+    # The same key must never be paired with different content.
+    if event.payload_hash != payload_hash:
+        raise IdempotencyConflict(
+            "Idempotency-Key has already been used with a different payload"
+        )
+
+    # Load the lead created by the first request.
+    lead = db.get(Lead, event.lead_id)
+
+    if lead is None:
+        raise IdempotencyConflict(
+            "The original Lead for this Idempotency-Key no longer exists"
+        )
+
+    return lead
+
+
+def create_lead_from_webhook(
+    db: Session,
+    data: LeadCreate,
+    idempotency_key: str,
+) -> tuple[Lead, bool]:
+    """Create a lead from a webhook call and return (lead, created).
+
+    `created` is False when the key was already processed with the same payload,
+    which lets the endpoint answer the retry with 200 instead of 201.
+    """
+    # 1. Fingerprint the incoming payload.
+    payload_hash = _calculate_payload_hash(data)
+
+    # 2. Check whether this key has already been processed.
+    statement = select(WebhookIdempotency).where(
+        WebhookIdempotency.idempotency_key == idempotency_key
+    )
+
+    existing_event = db.scalar(statement)
+
+    if existing_event is not None:
+        lead = _resolve_existing_webhook_event(
+            db,
+            existing_event,
+            payload_hash,
+        )
+
+        # A duplicate request: the lead already exists.
+        return lead, False
+
+    try:
+        # 3. Create the lead.
+        lead = _build_lead(data)
+        db.add(lead)
+
+        # 4. Flush first so the database generates the lead id.
+        db.flush()
+
+        # 5. Record the idempotency entry.
+        event = WebhookIdempotency(
+            idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
+            lead_id=lead.id,
+        )
+
+        db.add(event)
+
+        # 6. Commit the lead and the idempotency record in one transaction.
+        db.commit()
+
+        # 7. Reload the lead so generated columns are populated.
+        db.refresh(lead)
+
+        # First successful creation.
+        return lead, True
+
+    except IntegrityError:
+        # 8. The unique constraint fired, so roll back this attempt.
+        db.rollback()
+
+        # 9. Re-check: a concurrent request may have inserted the same key first.
+        existing_event = db.scalar(
+            select(WebhookIdempotency).where(
+                WebhookIdempotency.idempotency_key == idempotency_key
+            )
+        )
+
+        if existing_event is None:
+            # Any other integrity error is not an idempotency hit, so surface it.
+            raise
+
+        lead = _resolve_existing_webhook_event(
+            db,
+            existing_event,
+            payload_hash,
+        )
+
+        return lead, False
+
+    except Exception:
+        db.rollback()
+        raise

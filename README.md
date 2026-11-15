@@ -118,10 +118,10 @@ between environments.
 | `SQL_ECHO` | `false` | Set to `true` to log every SQL statement |
 | `WEBHOOK_SECRET` | `dev-secret-change-me` | Shared secret required by `POST /webhooks/leads` |
 
-Create a `.env` file in the project root to override them locally (it is git-ignored):
+Copy the template and fill in your own values (`.env` itself is git-ignored):
 
 ```bash
-WEBHOOK_SECRET=replace-with-a-long-random-value
+cp .env.example .env
 ```
 
 ## API Reference

@@ -1,5 +1,7 @@
 # Business Automation Platform
 
+[![CI](https://github.com/CtrlAltDev-wq/business-automation-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/CtrlAltDev-wq/business-automation-platform/actions/workflows/ci.yml)
+
 A business automation platform built with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL**
 and **n8n**. It helps small sales teams capture incoming inquiries from website forms and
 webhooks, clean up contact data, track leads through a sales pipeline, and fan new leads
@@ -44,6 +46,7 @@ out to Google Sheets, email auto-replies and n8n workflows with reliable retries
 | HTTP client | httpx / google-auth |
 | Server | Uvicorn |
 | Testing | pytest + FastAPI TestClient |
+| Linting | Ruff |
 
 ## Project Structure
 
@@ -94,6 +97,10 @@ business-automation-platform/
 │   ├── script.py.mako          # Migration file template
 │   └── versions/               # Migration scripts
 ├── alembic.ini                 # Alembic configuration
+├── ruff.toml                   # Lint configuration
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # Ruff + migration check + pytest
 ├── tests/
 │   ├── conftest.py             # Shared in-memory database fixture
 │   ├── test_lead.py            # Lead API tests
@@ -146,8 +153,28 @@ The API is available at `http://127.0.0.1:8000`, and the interactive docs at:
 ### 5. Run the tests
 
 ```bash
+ruff check .
 pytest -q
 ```
+
+## Continuous Integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and on
+every pull request:
+
+| Step | Command | Purpose |
+| --- | --- | --- |
+| Lint | `ruff check .` | Style, import order and common bug patterns |
+| Verify migrations | `alembic upgrade head` + `alembic check` | Schema builds, models and migrations agree |
+| Test | `pytest -q` | 38 API tests against in-memory SQLite |
+
+The lint rules live in `ruff.toml`: `E`, `F`, `W`, `I` and `B`, line length 100, with
+`B008` ignored because FastAPI dependency injection calls `Depends()` in argument defaults.
+`alembic/versions` is excluded from linting because those files are generated.
+
+The migration step runs against a throwaway SQLite database (`DATABASE_URL=sqlite:///./ci.db`),
+so no PostgreSQL service is required. `alembic check` fails the build when a model change
+was not turned into a migration.
 
 ## Configuration
 
@@ -446,9 +473,9 @@ Illegal transitions return `409 Conflict`; unknown status values return `422 Unp
 - [x] Background retry worker for email / Sheets / n8n automation
 - [x] Docker Compose stack (API + worker + PostgreSQL + n8n)
 - [x] Alembic database migrations
+- [x] CI pipeline (ruff + pytest)
 - [ ] Authentication and role-based permissions
 - [ ] Customer and deal modules
-- [ ] CI pipeline (ruff + pytest)
 
 ## License
 

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.schemas.intake import FormSubmission, IntakeResponse
-from app.services import integration_service, intake_service
+from app.services import intake_service, integration_service
 
 router = APIRouter(
     prefix="/intake",

@@ -9,6 +9,8 @@ out to Google Sheets, email auto-replies and n8n workflows with reliable retries
 
 ## Features
 
+- Static demo page at `/demo`: submit a website form and see the created lead plus the
+  queued automations, with no extra tooling
 - Website form intake: `POST /intake/forms` turns a raw form post into a lead
 - Contact extraction: missing email / phone / name are recovered from the free-text
   message (supports `+86`, spaces and dashes in phone numbers)
@@ -92,6 +94,8 @@ business-automation-platform/
 │   │       └── n8n.py          # n8n webhook adapter
 │   └── workers/
 │       └── integration_worker.py # Retry worker for pending events
+├── app/static/
+│   └── demo.html               # Browser demo page served at /demo
 ├── alembic/
 │   ├── env.py                  # Alembic environment (reads DATABASE_URL from settings)
 │   ├── script.py.mako          # Migration file template
@@ -147,6 +151,7 @@ uvicorn app.main:app --reload
 
 The API is available at `http://127.0.0.1:8000`, and the interactive docs at:
 
+- Demo page: `http://127.0.0.1:8000/demo`
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
@@ -156,6 +161,19 @@ The API is available at `http://127.0.0.1:8000`, and the interactive docs at:
 ruff check .
 pytest -q
 ```
+
+## Demo Page
+
+Open `http://127.0.0.1:8000/demo` after starting the server (or the Docker Compose stack).
+It is a single static HTML file served by FastAPI — no build step and no external assets.
+
+- The form posts JSON to `POST /api/v1/intake/forms`.
+- The response panel shows the created lead, the fields recovered from the message, and
+  the three queued outbox events.
+- Submitting the same email or phone twice shows `HTTP 200 · duplicate`, because the
+  message is stored as a follow-up note instead of creating another lead.
+- "Fill sample" inserts a message containing an email and a `+86` phone number, which
+  demonstrates extraction with the contact fields left empty.
 
 ## Continuous Integration
 
@@ -474,6 +492,7 @@ Illegal transitions return `409 Conflict`; unknown status values return `422 Unp
 - [x] Docker Compose stack (API + worker + PostgreSQL + n8n)
 - [x] Alembic database migrations
 - [x] CI pipeline (ruff + pytest)
+- [x] Static demo page (`/demo`)
 - [ ] Authentication and role-based permissions
 - [ ] Customer and deal modules
 

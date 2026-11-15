@@ -1,9 +1,14 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 
 from app.api.v1.router import api_router
 from app.core.logging import configure_logging
 
 configure_logging()
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(
     title="Business Automation Platform",
@@ -33,6 +38,12 @@ def health():
     return {
         "status": "ok",
     }
+
+
+@app.get("/demo", include_in_schema=False)
+def demo_page() -> FileResponse:
+    """Serve the static lead intake demo page."""
+    return FileResponse(STATIC_DIR / "demo.html", media_type="text/html")
 
 
 app.include_router(

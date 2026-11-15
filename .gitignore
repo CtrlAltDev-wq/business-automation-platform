@@ -34,3 +34,5 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+docs/CODE_CHANGES_zh.md
+docs/README.zh-CN.md

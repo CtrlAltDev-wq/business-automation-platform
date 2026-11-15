@@ -9,6 +9,20 @@ from sqlalchemy.pool import StaticPool
 # Keep the test suite on SQLite even when .env points the app at PostgreSQL.
 os.environ["DATABASE_URL"] = "sqlite://"
 
+# Force every integration into dry-run mode. Real environment variables take
+# priority over .env, and tests must never call n8n / Google Sheets / SMTP even
+# when the developer exported those credentials in the current shell.
+os.environ.update(
+    {
+        "N8N_WEBHOOK_URL": "",
+        "GOOGLE_SERVICE_ACCOUNT_FILE": "",
+        "GOOGLE_SHEETS_SPREADSHEET_ID": "",
+        "SMTP_HOST": "",
+        "SMTP_USERNAME": "",
+        "SMTP_PASSWORD": "",
+    }
+)
+
 from app.db.base import Base  # noqa: E402
 from app.db.database import get_db  # noqa: E402
 from app.main import app  # noqa: E402

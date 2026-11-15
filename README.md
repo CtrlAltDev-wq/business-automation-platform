@@ -189,6 +189,41 @@ Special characters in the password must be URL-encoded (for example `!` becomes
 `%21`). Tables are created automatically on startup; for schema changes use a
 migration tool such as Alembic.
 
+### Docker Compose
+
+The whole stack starts with one command:
+
+```bash
+docker compose up --build
+```
+
+| Service | Host address | Notes |
+| --- | --- | --- |
+| API | `http://127.0.0.1:8000` | Swagger UI at `/docs` |
+| Worker | – | Runs `integration_worker` in a retry loop |
+| PostgreSQL | `127.0.0.1:5433` | Port 5433 avoids clashing with a local PostgreSQL on 5432 |
+| n8n | `http://127.0.0.1:5679` | Port 5679 avoids clashing with a local n8n on 5678 |
+
+Four containers are started: `api`, `worker`, `db` and `n8n`. PostgreSQL and n8n
+data live in named volumes (`postgres_data`, `n8n_data`), so they survive
+`docker compose down`.
+
+The API container reads `WEBHOOK_SECRET` from the local `.env` through compose
+variable substitution. `N8N_WEBHOOK_URL` is intentionally empty (dry-run); to
+deliver events to the bundled n8n instance, change it in `docker-compose.yml` to
+`http://n8n:5678/webhook/<path>`. Inside compose, `127.0.0.1` refers to the
+container itself, not the host.
+
+Useful commands:
+
+```bash
+docker compose logs -f api        # API logs
+docker compose logs -f worker     # retry worker logs
+docker compose exec db psql -U app_user -d business_automation -c '\dt'
+docker compose down               # stop, keep data
+docker compose down -v            # stop and delete volumes
+```
+
 ## API Reference
 
 Base path: `/api/v1`
@@ -372,11 +407,11 @@ Illegal transitions return `409 Conflict`; unknown status values return `422 Unp
 ## Roadmap
 
 - [x] Background retry worker for email / Sheets / n8n automation
+- [x] Docker Compose stack (API + worker + PostgreSQL + n8n)
 - [ ] Authentication and role-based permissions
 - [ ] Alembic database migrations
 - [ ] Customer and deal modules
-- [ ] Docker Compose stack (API + PostgreSQL + n8n)
-- [ ] Docker image and CI pipeline
+- [ ] CI pipeline (ruff + pytest)
 
 ## License
 

@@ -1,0 +1,27 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local environment and data
+.venv/
+venv/
+.env
+.env.*
+business.db
+*.sqlite
+*.sqlite3
+
+# Secrets and local-only files
+secrets/
+docs/
+
+# Tooling and VCS
+.git/
+.gitignore
+.vscode/
+tests/
+Dockerfile
+docker-compose.yml
+README.md

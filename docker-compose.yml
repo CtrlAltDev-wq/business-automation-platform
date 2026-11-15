@@ -1,0 +1,69 @@
+# Shared environment for the API and the retry worker.
+# The database host is the compose service name "db", not 127.0.0.1.
+# Values are read from .env when present, otherwise the defaults below apply.
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql+psycopg://app_user:ChangeMe_2026%21@db:5432/business_automation
+  WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-secret-change-me}
+  SQL_ECHO: ${SQL_ECHO:-false}
+  INTEGRATIONS_ENABLED: ${INTEGRATIONS_ENABLED:-true}
+  INTEGRATION_MAX_ATTEMPTS: ${INTEGRATION_MAX_ATTEMPTS:-5}
+  INTEGRATION_RETRY_BASE_SECONDS: ${INTEGRATION_RETRY_BASE_SECONDS:-30}
+  # Docker-specific URL: inside a container 127.0.0.1 is the container itself.
+  # host.docker.internal points at the host machine (n8n published on 5678).
+  # Override with N8N_WEBHOOK_URL_DOCKER (e.g. http://n8n:5678/webhook/...) when
+  # n8n runs as a service in this compose network.
+  N8N_WEBHOOK_URL: "${N8N_WEBHOOK_URL_DOCKER:-http://host.docker.internal:5678/webhook/lead-created}"
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: business_automation
+      POSTGRES_USER: app_user
+      POSTGRES_PASSWORD: "ChangeMe_2026!"
+    # 5433 on the host to avoid clashing with a local PostgreSQL on 5432.
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app_user -d business_automation"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    environment: *app-environment
+    # Makes host.docker.internal work on Linux too (Docker Desktop provides it).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.workers.integration_worker", "--interval", "15"]
+    environment: *app-environment
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  n8n:
+    image: n8nio/n8n:latest
+    # 5679 on the host to avoid clashing with a local n8n on 5678.
+    ports:
+      - "5679:5678"
+    environment:
+      N8N_SECURE_COOKIE: "false"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  postgres_data:
+  n8n_data:

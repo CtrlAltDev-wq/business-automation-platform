@@ -1,19 +1,30 @@
 # Business Automation Platform
 
-A RESTful lead management API built with **FastAPI**, **SQLAlchemy 2.0** and **SQLite**.
-It is the first module of a business automation platform that helps small sales teams
-capture incoming inquiries, track them through a sales pipeline, and record follow-up
-activities.
+A business automation platform built with **FastAPI**, **SQLAlchemy 2.0**, **PostgreSQL**
+and **n8n**. It helps small sales teams capture incoming inquiries from website forms and
+webhooks, clean up contact data, track leads through a sales pipeline, and fan new leads
+out to Google Sheets, email auto-replies and n8n workflows with reliable retries.
 
 ## Features
 
+- Website form intake: `POST /intake/forms` turns a raw form post into a lead
+- Contact extraction: missing email / phone / name are recovered from the free-text
+  message (supports `+86`, spaces and dashes in phone numbers)
+- Duplicate detection: an existing email or phone stores the submission as a follow-up
+  note instead of creating a second lead
+- Reliable outbound integrations via a transactional outbox (`integration_events`):
+  one event per target, attempted inline and retried by a worker with exponential backoff
+- Google Sheets sync (`values:append`), SMTP email auto-reply and n8n webhook trigger
+- Every integration degrades to a logged dry-run when its credentials are not configured
+- Signed webhook ingestion with idempotency keys (retries never create duplicate leads)
 - Create, read, update and delete leads (full CRUD)
 - Paginated lead list with keyword search, status filter and sorting
 - Enum-validated lead status with a guarded state machine:
   `NEW → CONTACTED → QUALIFIED → CONVERTED` (any active stage can move to `LOST`)
 - Follow-up notes attached to a lead, returned newest first
-- Dashboard summary endpoint: lead / follow-up totals, per-status counters and the five latest follow-ups
-- Signed webhook ingestion with idempotency keys (retries never create duplicate leads)
+- Dashboard summary endpoint: lead / follow-up totals, per-status counters, integration
+  event counters and the five latest follow-ups
+- Structured logging (`timestamp | level | logger | message`) to stdout
 - Email validation via Pydantic `EmailStr`
 - Automatic OpenAPI / Swagger documentation
 - Test suite running against an in-memory SQLite database
@@ -27,6 +38,8 @@ activities.
 | Validation | Pydantic v2 |
 | Configuration | pydantic-settings (`.env` support) |
 | Database | PostgreSQL 17 via `psycopg` (SQLite also supported) |
+| Integrations | n8n webhooks, Google Sheets API v4, SMTP email |
+| HTTP client | httpx / google-auth |
 | Server | Uvicorn |
 | Testing | pytest + FastAPI TestClient |
 
@@ -40,12 +53,15 @@ business-automation-platform/
 │   │   └── v1/
 │   │       ├── router.py       # Version 1 API router
 │   │       └── endpoints/
-│   │           ├── lead.py     # Lead HTTP endpoints
-│   │           ├── dashboard.py # Dashboard statistics endpoint
-│   │           └── webhook.py  # Signed lead ingestion endpoint
+│   │           ├── lead.py         # Lead HTTP endpoints
+│   │           ├── dashboard.py    # Dashboard statistics endpoint
+│   │           ├── intake.py       # Website form intake endpoint
+│   │           ├── integrations.py # Outbox inspection and manual retry
+│   │           └── webhook.py      # Signed lead ingestion endpoint
 │   ├── core/
 │   │   ├── config.py           # Environment-driven settings (.env)
-│   │   ├── constants.py        # Pipeline statuses, transitions and shared constants
+│   │   ├── constants.py        # Pipeline statuses, event types and shared constants
+│   │   ├── logging.py          # Structured stdout logging
 │   │   └── security.py         # Webhook shared-secret verification
 │   ├── db/
 │   │   ├── base.py             # Declarative base
@@ -53,18 +69,31 @@ business-automation-platform/
 │   ├── models/
 │   │   ├── lead.py             # Lead ORM model
 │   │   ├── lead_follow_up.py   # Follow-up ORM model
+│   │   ├── integration_event.py # Outbox for outbound integration events
 │   │   └── webhook_idempotency.py # Processed webhook events
 │   ├── schemas/
 │   │   ├── lead.py             # Lead request / response schemas
-│   │   └── dashboard.py        # Dashboard response schemas
-│   └── services/
-│       ├── lead_service.py     # Lead business logic and queries
-│       └── dashboard_service.py # Dashboard aggregation queries
+│   │   ├── dashboard.py        # Dashboard response schemas
+│   │   ├── intake.py           # Form submission schemas
+│   │   └── integration.py      # Integration event schemas
+│   ├── services/
+│   │   ├── lead_service.py     # Lead business logic and queries
+│   │   ├── intake_service.py   # Normalisation, extraction and deduplication
+│   │   ├── integration_service.py # Outbox queue, dispatch and retry policy
+│   │   ├── dashboard_service.py # Dashboard aggregation queries
+│   │   └── integrations/
+│   │       ├── sheets.py       # Google Sheets append adapter
+│   │       ├── mailer.py       # SMTP auto-reply adapter
+│   │       └── n8n.py          # n8n webhook adapter
+│   └── workers/
+│       └── integration_worker.py # Retry worker for pending events
 ├── tests/
 │   ├── conftest.py             # Shared in-memory database fixture
 │   ├── test_lead.py            # Lead API tests
 │   ├── test_dashboard.py       # Dashboard API tests
-│   └── test_webhook.py         # Webhook ingestion and idempotency tests
+│   ├── test_webhook.py         # Webhook ingestion and idempotency tests
+│   ├── test_intake.py          # Form intake, extraction and dedup tests
+│   └── test_integrations.py    # Outbox queueing, retry and counters tests
 ├── requirements.txt
 └── README.md
 ```
@@ -116,7 +145,20 @@ between environments.
 | --- | --- | --- |
 | `DATABASE_URL` | `sqlite:///./business.db` | SQLAlchemy URL, e.g. `postgresql+psycopg://app_user:secret@127.0.0.1:5432/business_automation` |
 | `SQL_ECHO` | `false` | Set to `true` to log every SQL statement |
-| `WEBHOOK_SECRET` | `dev-secret-change-me` | Shared secret required by `POST /webhooks/leads` |
+| `WEBHOOK_SECRET` | `dev-secret-change-me` | Shared secret required by `POST /webhooks/leads` and `/integrations/*` |
+| `INTEGRATIONS_ENABLED` | `true` | Master switch for the outbound automation queue |
+| `INTEGRATION_MAX_ATTEMPTS` | `5` | Delivery attempts before an event is marked `FAILED` |
+| `INTEGRATION_RETRY_BASE_SECONDS` | `30` | Base delay; backoff is 30s, 60s, 120s, ... |
+| `N8N_WEBHOOK_URL` | – | n8n Webhook node URL; empty means dry-run |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | – | Path to the Google service-account JSON key |
+| `GOOGLE_SHEETS_SPREADSHEET_ID` | – | Target spreadsheet id |
+| `GOOGLE_SHEETS_RANGE` | `Leads!A:H` | Sheet range used by `values:append` |
+| `SMTP_HOST` | – | SMTP server; empty means the auto-reply is only logged |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | – | SMTP credentials |
+| `SMTP_FROM` | `noreply@example.com` | Sender address |
+| `SMTP_USE_TLS` | `true` | Use STARTTLS |
+| `AUTO_REPLY_SUBJECT` / `AUTO_REPLY_BODY` | see `.env.example` | Auto-reply template; `{name}` is replaced by the lead name |
 
 Copy the template and fill in your own values (`.env` itself is git-ignored):
 
@@ -161,8 +203,11 @@ Base path: `/api/v1`
 | `PATCH` | `/leads/{lead_id}/status` | Move a lead to another pipeline status |
 | `POST` | `/leads/{lead_id}/follow-ups` | Add a follow-up note |
 | `GET` | `/leads/{lead_id}/follow-ups` | List follow-up notes (newest first) |
-| `GET` | `/dashboard/summary` | Dashboard totals, per-status counts and 5 latest follow-ups |
+| `POST` | `/intake/forms` | Convert a raw website form submission into a lead |
+| `GET` | `/dashboard/summary` | Dashboard totals, status counters, integration counters and 5 latest follow-ups |
 | `POST` | `/webhooks/leads` | Authenticated lead ingestion with idempotency support |
+| `POST` | `/integrations/process` | Deliver all due outbound events now (manual retry) |
+| `GET` | `/integrations/events` | Inspect outbound events (`status`, `limit`) |
 
 Health check: `GET /health`
 
@@ -200,6 +245,11 @@ Example dashboard response:
     "QUALIFIED": 0,
     "CONVERTED": 0,
     "LOST": 0
+  },
+  "integration_events": {
+    "PENDING": 0,
+    "SENT": 3,
+    "FAILED": 0
   },
   "recent_follow_ups": [
     {
@@ -246,6 +296,69 @@ Each request is fingerprinted with a SHA-256 hash of its canonical JSON payload 
 stored in `webhook_idempotency` together with the created lead, in a single transaction.
 Concurrent retries are resolved by the unique constraint on `idempotency_key`.
 
+### Website Form Intake
+
+`POST /api/v1/intake/forms` accepts a raw form payload. All fields except a contact
+method are optional, and unknown fields (extra form widgets) are allowed.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/intake/forms \
+  -H "Content-Type: application/json" \
+  -d '{"name":"","email":"","message":"Hi, I am Alice, alice@example.com, 138 0013 8000","source":"landing_page"}'
+```
+
+The intake pipeline:
+
+1. **Normalise** – emails are lower-cased and validated; phone numbers lose spaces,
+   dashes and the `+86` / `0086` prefix.
+2. **Extract** – any contact detail missing from the form is recovered from the
+   message and from extra fields (`Regex` for email and phone; the email local part
+   becomes the name when no name is given).
+3. **Deduplicate** – an existing email or phone stores the submission as a follow-up
+   note and returns `200` with `"duplicate": true` instead of creating a lead.
+4. **Queue automations** – three outbox events are written in the same transaction:
+   Google Sheets append, email auto-reply and the n8n `lead.created` webhook.
+
+A submission without any recoverable email or phone returns `422 Unprocessable Entity`.
+
+### Outbound Integrations
+
+New leads fan out through a transactional outbox table (`integration_events`), which
+makes delivery reliable without a message broker:
+
+| Event type | Adapter | Target |
+| --- | --- | --- |
+| `sheets.append_lead` | `services/integrations/sheets.py` | Google Sheets `values:append` |
+| `email.auto_reply` | `services/integrations/mailer.py` | SMTP auto-reply to the lead |
+| `n8n.lead_created` | `services/integrations/n8n.py` | `POST {"event":"lead.created","data":{...}}` |
+
+Event lifecycle: `PENDING → SENT`, or `PENDING → FAILED` after
+`INTEGRATION_MAX_ATTEMPTS` failures. Retries use exponential backoff
+(30s, 60s, 120s, ...) stored in `next_retry_at`. Any adapter whose credentials are
+missing runs in dry-run mode and is recorded as sent, so the demo works with an
+empty `.env`.
+
+```bash
+# Inspect recent events (including failures and their last_error)
+curl -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "http://127.0.0.1:8000/api/v1/integrations/events?status=PENDING&limit=20"
+
+# Deliver due events right now (manual retry)
+curl -X POST -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  http://127.0.0.1:8000/api/v1/integrations/process
+```
+
+The first delivery attempt happens inline in the request; later retries are handled by
+the worker:
+
+```bash
+# Process due events once and exit
+python -m app.workers.integration_worker --once
+
+# Run continuously, polling every 15 seconds (the default)
+python -m app.workers.integration_worker --interval 15
+```
+
 ### Status Workflow
 
 ```
@@ -258,10 +371,11 @@ Illegal transitions return `409 Conflict`; unknown status values return `422 Unp
 
 ## Roadmap
 
+- [x] Background retry worker for email / Sheets / n8n automation
 - [ ] Authentication and role-based permissions
 - [ ] Alembic database migrations
 - [ ] Customer and deal modules
-- [ ] Background jobs for email / notification automation
+- [ ] Docker Compose stack (API + PostgreSQL + n8n)
 - [ ] Docker image and CI pipeline
 
 ## License

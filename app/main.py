@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.api.v1.router import api_router
+from app.core.logging import configure_logging
 
 from app.db.database import engine
 from app.db.base import Base
@@ -9,11 +10,17 @@ from app.db.base import Base
 from app.models.lead import Lead  # noqa: F401
 from app.models.lead_follow_up import LeadFollowUp  # noqa: F401
 from app.models.webhook_idempotency import WebhookIdempotency  # noqa: F401
+from app.models.integration_event import IntegrationEvent  # noqa: F401
+
+configure_logging()
 
 app = FastAPI(
     title="Business Automation Platform",
-    description="A business automation platform built with Python",
-    version="0.1.0",
+    description=(
+        "Lead intake and CRM automation API: website forms, webhook ingestion, "
+        "deduplication, Google Sheets sync, email auto-replies and n8n workflows."
+    ),
+    version="0.2.0",
 )
 
 # Create the database tables on startup. For real deployments, replace this with
@@ -26,7 +33,7 @@ def root():
     """Return basic service information."""
     return {
         "message": "Business Automation Platform",
-        "version": "0.1.0",
+        "version": "0.2.0",
     }
 
 

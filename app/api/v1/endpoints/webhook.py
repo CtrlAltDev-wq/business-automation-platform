@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.security import verify_webhook_secret
 from app.db.database import get_db
 from app.schemas.lead import LeadCreate, LeadResponse
-from app.services import lead_service
+from app.services import integration_service, lead_service
 
 router = APIRouter(
     prefix="/webhooks",
@@ -57,5 +57,13 @@ def receive_lead_webhook(
     # A duplicate request returns 200 (already exists) instead of 201 (created).
     if not created:
         response.status_code = http_status.HTTP_200_OK
+        return lead
+
+    # Fan the new lead out to the configured automations after responding.
+    events = integration_service.enqueue_lead_created(db, lead, source="webhook")
+
+    # First delivery attempt happens inline; retries are handled by the worker.
+    if events:
+        integration_service.process_pending(db, limit=len(events))
 
     return lead

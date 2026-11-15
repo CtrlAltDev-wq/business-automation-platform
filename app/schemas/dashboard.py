@@ -19,4 +19,5 @@ class DashboardSummaryResponse(BaseModel):
     total_leads: int
     total_follow_ups: int
     status_counts: dict[str, int]
+    integration_events: dict[str, int]
     recent_follow_ups: list[RecentFollowUpResponse]

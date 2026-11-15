@@ -1,7 +1,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.constants import LEAD_STATUSES
+from app.core.constants import INTEGRATION_EVENT_STATUSES, LEAD_STATUSES
+from app.models.integration_event import IntegrationEvent
 from app.models.lead import Lead
 from app.models.lead_follow_up import LeadFollowUp
 
@@ -74,11 +75,31 @@ def get_dashboard_summary(db: Session):
         .all()
     )
 
-    # 5. Assemble the dashboard response.
+    # 5. Count outbound integration events per status (delivery health).
+    event_statement = (
+        select(
+            IntegrationEvent.status,
+            func.count(IntegrationEvent.id),
+        )
+        .group_by(IntegrationEvent.status)
+    )
+
+    event_rows = db.execute(event_statement).all()
+
+    integration_events = {
+        status: 0
+        for status in INTEGRATION_EVENT_STATUSES
+    }
+
+    for event_status, count in event_rows:
+        integration_events[event_status] = count
+
+    # 6. Assemble the dashboard response.
     return {
         "total_leads": total_leads,
         "total_follow_ups": total_follow_ups,
         "status_counts": status_counts,
+        "integration_events": integration_events,
         "recent_follow_ups": [
             dict(row)
             for row in recent_rows

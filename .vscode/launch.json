@@ -17,6 +17,26 @@
             "subProcess": true,
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Python: Integration worker (once)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "app.workers.integration_worker",
+            "args": ["--once"],
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Python: Integration worker (loop)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "app.workers.integration_worker",
+            "args": ["--interval", "15"],
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

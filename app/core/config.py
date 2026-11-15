@@ -21,6 +21,39 @@ class Settings(BaseSettings):
     # Log every SQL statement when true.
     sql_echo: bool = False
 
+    # ------------------------------------------------------------------
+    # Integrations
+    # ------------------------------------------------------------------
+    # Master switch for outbound automations (Sheets / email / n8n).
+    integrations_enabled: bool = True
+
+    # Retry policy for failed outbound events.
+    integration_max_attempts: int = 5
+    integration_retry_base_seconds: int = 30
+
+    # n8n: a webhook node URL that receives lead.created events.
+    n8n_webhook_url: str | None = None
+
+    # Google Sheets: service-account JSON file and target spreadsheet.
+    google_service_account_file: str | None = None
+    google_sheets_spreadsheet_id: str | None = None
+    google_sheets_range: str = "Leads!A:H"
+
+    # SMTP: when smtp_host is empty the auto-reply is logged instead of sent.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str = "noreply@example.com"
+    smtp_use_tls: bool = True
+    auto_reply_subject: str = "Thanks for contacting us"
+    auto_reply_body: str = (
+        "Hi {name},\n\n"
+        "thank you for getting in touch. We have received your message "
+        "and will reply within one business day.\n\n"
+        "Best regards,\nThe team"
+    )
+
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
